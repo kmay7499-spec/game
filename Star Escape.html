@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Star Escape</title>
+<style>
+  :root { --bg:#05040f; --cyan:#27f3ff; --gold:#ffd23f; --pink:#ff3d9a; --text:#e8f6ff; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font-family:'Tahoma','Trebuchet MS',sans-serif; overflow:hidden; touch-action:none; user-select:none; }
+  body { display:flex; flex-direction:column; align-items:center; justify-content:center; }
+  #wrap { position:relative; box-shadow:0 0 0 2px #1b2a55, 0 0 30px #27f3ff44; background:#000; }
+  canvas { display:block; width:100%; height:100%; }
+  .screen { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; text-align:center; background:rgba(5,4,15,.82); padding:1.5em; }
+  .hidden { display:none !important; }
+  h1 { margin:0 0 .3em; font-size:2.6em; letter-spacing:.08em; color:var(--cyan);
+    text-shadow:0 0 8px var(--cyan), 0 0 24px var(--cyan); }
+  h1.over { color:var(--pink); text-shadow:0 0 8px var(--pink), 0 0 24px var(--pink); }
+  p { margin:.35em 0; font-size:1em; line-height:1.5; color:#b9c9ee; }
+  .big { font-size:1.6em; color:var(--gold); text-shadow:0 0 10px #ffd23f88; }
+  button.main { margin-top:1.2em; padding:.7em 1.8em; font-size:1.2em; font-family:inherit; color:var(--bg);
+    background:var(--cyan); border:0; border-radius:.3em; cursor:pointer; box-shadow:0 0 18px var(--cyan); }
+  button.main:active { transform:scale(.96); }
+  button:focus-visible { outline:3px solid var(--gold); outline-offset:3px; }
+  #pad { display:none; grid-template-columns:repeat(3, 1fr); grid-template-rows:repeat(2, 1fr); gap:6px;
+    width:200px; height:132px; margin-top:8px; }
+  #pad button { background:#101a3a; color:var(--cyan); border:2px solid #27f3ff88; border-radius:10px;
+    font-size:24px; touch-action:none; }
+  #pad button.on { background:#27f3ff33; box-shadow:0 0 12px var(--cyan); }
+  #pad .u { grid-column:2; grid-row:1; } #pad .l { grid-column:1; grid-row:2; }
+  #pad .d { grid-column:2; grid-row:2; } #pad .r { grid-column:3; grid-row:2; }
+  @media (pointer:coarse) { #pad { display:grid; } }
+  @media (prefers-reduced-motion:reduce) { * { transition:none !important; } }
+</style>
+</head>
+<body>
+
+<div id="wrap">
+  <canvas id="game" width="480" height="720"></canvas>
+
+  <!-- หน้าเริ่มเกม -->
+  <div id="startScreen" class="screen">
+    <h1>STAR ESCAPE</h1>
+    <p>เก็บดาว ⭐ ให้ได้มากที่สุด<br>หลบอุกกาบาต ☄️ ให้รอด</p>
+    <p>คีย์บอร์ด: ลูกศร หรือ W A S D<br>มือถือ: ใช้ปุ่มด้านล่าง<br>กด P เพื่อพัก</p>
+    <p class="big">คะแนนสูงสุด: <span id="bestStart">0</span></p>
+    <button class="main" id="startBtn">เริ่มเกม</button>
+  </div>
+
+  <!-- หน้า Game Over -->
+  <div id="overScreen" class="screen hidden">
+    <h1 class="over">GAME OVER</h1>
+    <p>คะแนนของคุณ</p>
+    <p class="big" id="finalScore">0</p>
+    <p id="newBest" class="big hidden">🏆 สถิติใหม่!</p>
+    <p>คะแนนสูงสุด: <span id="bestOver">0</span></p>
+    <button class="main" id="restartBtn">เล่นอีกครั้ง (Restart)</button>
+  </div>
+</div>
+
+<!-- ปุ่มควบคุมบนมือถือ -->
+<div id="pad">
+  <button class="u" data-k="up" aria-label="ขึ้น">▲</button>
+  <button class="l" data-k="left" aria-label="ซ้าย">◀</button>
+  <button class="d" data-k="down" aria-label="ลง">▼</button>
+  <button class="r" data-k="right" aria-label="ขวา">▶</button>
+</div>
+
+<script>
+/* ============================================================
+   STAR ESCAPE  -  ไฟล์เดียว ไม่ใช้ไลบรารี
+   แก้ค่าที่อยากปรับได้ที่ CONFIG ด้านล่างนี้
+   ============================================================ */
+const CONFIG = {
+  playerSpeed: 300,      // ความเร็วยาน (พิกเซล/วินาที)
+  rockSpeed: 130,        // ความเร็วเริ่มต้นของอุกกาบาต
+  rockSpeedGrow: 4,      // ความเร็วที่เพิ่มขึ้นทุก 1 วินาที
+  rockSpeedMax: 430,     // ความเร็วสูงสุดของอุกกาบาต
+  rockSpawnStart: 0.85,  // ระยะเวลา (วินาที) ระหว่างอุกกาบาตตอนเริ่ม
+  rockSpawnMin: 0.24,    // เร็วที่สุดที่อุกกาบาตจะโผล่
+  rockSpawnShrink: 0.01, // เวลาที่ลดลงต่อวินาที (ยิ่งมากยิ่งยากเร็ว)
+  starSpawn: 1.1,        // ดาวโผล่ทุกกี่วินาที
+  levelSeconds: 15       // เลื่อนเลเวลทุกกี่วินาที
+};
+
+const W = 480, H = 720;
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const wrap = document.getElementById('wrap');
+const startScreen = document.getElementById('startScreen');
+const overScreen = document.getElementById('overScreen');
+
+/* ---------- คะแนนสูงสุด (เก็บในเบราว์เซอร์) ---------- */
+let best = 0;
+try { best = parseInt(localStorage.getItem('starEscapeBest')) || 0; } catch (e) {}
+function saveBest() { try { localStorage.setItem('starEscapeBest', best); } catch (e) {} }
+function showBest() {
+  document.getElementById('bestStart').textContent = best;
+  document.getElementById('bestOver').textContent = best;
+}
+showBest();
+
+/* ---------- การควบคุม ---------- */
+const input = { left:false, right:false, up:false, down:false };
+const keyMap = { ArrowLeft:'left', a:'left', A:'left', ArrowRight:'right', d:'right', D:'right',
+                 ArrowUp:'up', w:'up', W:'up', ArrowDown:'down', s:'down', S:'down' };
+
+window.addEventListener('keydown', e => {
+  if (keyMap[e.key]) { input[keyMap[e.key]] = true; e.preventDefault(); return; }
+  if (e.key === 'p' || e.key === 'P') { togglePause(); return; }
+  if (e.key === 'Enter' || e.key === ' ') {
+    if (state !== 'play') { e.preventDefault(); startGame(); }
+  }
+});
+window.addEventListener('keyup', e => { if (keyMap[e.key]) input[keyMap[e.key]] = false; });
+window.addEventListener('blur', () => { for (const k in input) input[k] = false; });
+
+document.querySelectorAll('#pad button').forEach(btn => {
+  const k = btn.dataset.k;
+  const on  = e => { e.preventDefault(); input[k] = true;  btn.classList.add('on'); };
+  const off = e => { e.preventDefault(); input[k] = false; btn.classList.remove('on'); };
+  btn.addEventListener('pointerdown', on);
+  ['pointerup','pointerleave','pointercancel'].forEach(ev => btn.addEventListener(ev, off));
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+});
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('restartBtn').addEventListener('click', startGame);
+
+/* ---------- ปรับขนาดให้พอดีหน้าจอ ---------- */
+function resize() {
+  const pad = document.getElementById('pad');
+  const padH = getComputedStyle(pad).display === 'none' ? 0 : pad.offsetHeight + 10;
+  const s = Math.min(innerWidth / W, (innerHeight - padH - 8) / H);
+  wrap.style.width = (W * s) + 'px';
+  wrap.style.height = (H * s) + 'px';
+  wrap.style.fontSize = (16 * s) + 'px';
+}
+addEventListener('resize', resize);
+resize();
+
+/* ---------- ตัวแปรของเกม ---------- */
+let state = 'menu';      // menu | play | over
+let paused = false;
+let score = 0, time = 0, level = 1, rockTimer = 0, starTimer = 0, shake = 0;
+let player = { x: W / 2, y: H - 110, r: 14 };
+let rocks = [], stars = [], particles = [];
+
+// ดาวพื้นหลัง (ให้ความรู้สึกว่ากำลังบินไปข้างหน้า)
+const bg = Array.from({ length: 70 }, () => ({
+  x: Math.random() * W, y: Math.random() * H,
+  z: 0.3 + Math.random() * 0.9
+}));
+
+function startGame() {
+  score = 0; time = 0; level = 1; shake = 0;
+  player = { x: W / 2, y: H - 110, r: 14 };
+  rocks = []; stars = []; particles = [];
+  rockTimer = 0.8; starTimer = 0.4;
+  paused = false;
+  state = 'play';
+  startScreen.classList.add('hidden');
+  overScreen.classList.add('hidden');
+}
+
+function togglePause() { if (state === 'play') paused = !paused; }
+
+function gameOver() {
+  state = 'over';
+  burst(player.x, player.y, 40, '#27f3ff', 260);
+  burst(player.x, player.y, 25, '#ff3d9a', 200);
+  shake = 0.5;
+  const isNew = score > best;
+  if (isNew) { best = score; saveBest(); }
+  showBest();
+  document.getElementById('finalScore').textContent = score;
+  document.getElementById('newBest').classList.toggle('hidden', !isNew);
+  setTimeout(() => { if (state === 'over') overScreen.classList.remove('hidden'); }, 700);
+}
+
+/* ---------- สร้างวัตถุ ---------- */
+function spawnRock() {
+  const r = 14 + Math.random() * 22;
+  const n = 9, pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2, d = r * (0.72 + Math.random() * 0.38);
+    pts.push([Math.cos(a) * d, Math.sin(a) * d]);
+  }
+  const base = Math.min(CONFIG.rockSpeedMax, CONFIG.rockSpeed + time * CONFIG.rockSpeedGrow);
+  rocks.push({
+    x: r + Math.random() * (W - r * 2), y: -r - 10, r,
+    vy: base * (0.8 + Math.random() * 0.45),
+    vx: (Math.random() - 0.5) * (40 + level * 12),
+    rot: Math.random() * 6, vr: (Math.random() - 0.5) * 3, pts
+  });
+}
+function spawnStar() {
+  stars.push({ x: 24 + Math.random() * (W - 48), y: -20, r: 12,
+               vy: 110 + Math.random() * 50, rot: 0 });
+}
+function burst(x, y, n, color, speed) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, v = speed * (0.2 + Math.random());
+    particles.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v,
+                     life: 0.5 + Math.random() * 0.5, max: 1, color });
+  }
+}
+
+/* ---------- อัปเดตเกม ---------- */
+function update(dt) {
+  // พื้นหลังเลื่อนตลอด
+  for (const s of bg) { s.y += 60 * s.z * dt * (1 + level * 0.1); if (s.y > H) { s.y = 0; s.x = Math.random() * W; } }
+  for (const p of particles) { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+  particles = particles.filter(p => p.life > 0);
+  if (shake > 0) shake -= dt;
+
+  if (state !== 'play' || paused) return;
+
+  time += dt;
+  level = 1 + Math.floor(time / CONFIG.levelSeconds);
+
+  // เคลื่อนที่ยาน
+  let dx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+  let dy = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+  if (dx && dy) { dx *= 0.7071; dy *= 0.7071; }
+  player.x = Math.max(player.r, Math.min(W - player.r, player.x + dx * CONFIG.playerSpeed * dt));
+  player.y = Math.max(player.r + 40, Math.min(H - player.r, player.y + dy * CONFIG.playerSpeed * dt));
+  if (dx || dy) burst(player.x, player.y + 16, 1, '#27f3ff', 60);
+
+  // สร้างอุกกาบาต (ยิ่งเล่นนาน ยิ่งโผล่ถี่)
+  rockTimer -= dt;
+  if (rockTimer <= 0) {
+    spawnRock();
+    if (time > 25 && Math.random() < 0.3) spawnRock();
+    rockTimer = Math.max(CONFIG.rockSpawnMin, CONFIG.rockSpawnStart - time * CONFIG.rockSpawnShrink) * (0.8 + Math.random() * 0.4);
+  }
+  starTimer -= dt;
+  if (starTimer <= 0) { spawnStar(); starTimer = CONFIG.starSpawn * (0.7 + Math.random() * 0.6); }
+
+  for (const r of rocks) {
+    r.y += r.vy * dt; r.x += r.vx * dt; r.rot += r.vr * dt;
+    if (r.x < r.r || r.x > W - r.r) r.vx *= -1;
+  }
+  for (const s of stars) { s.y += s.vy * dt; s.rot += 2 * dt; }
+
+  // เก็บดาว
+  stars = stars.filter(s => {
+    if (Math.hypot(s.x - player.x, s.y - player.y) < s.r + player.r + 4) {
+      score++; burst(s.x, s.y, 14, '#ffd23f', 180); return false;
+    }
+    return s.y < H + 30;
+  });
+  rocks = rocks.filter(r => r.y < H + r.r + 20);
+
+  // ชนอุกกาบาต = จบเกม
+  for (const r of rocks) {
+    if (Math.hypot(r.x - player.x, r.y - player.y) < player.r * 0.75 + r.r * 0.82) { gameOver(); break; }
+  }
+}
+
+/* ---------- วาดภาพ ---------- */
+function glow(color, blur) { ctx.shadowColor = color; ctx.shadowBlur = blur; }
+function noGlow() { ctx.shadowBlur = 0; }
+
+function drawShip(x, y) {
+  ctx.save(); ctx.translate(x, y);
+  glow('#27f3ff', 16);
+  ctx.strokeStyle = '#27f3ff'; ctx.fillStyle = '#0a2a3a'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(0, -20); ctx.lineTo(15, 14); ctx.lineTo(0, 7); ctx.lineTo(-15, 14); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // เปลวไฟท้ายยาน
+  glow('#ff3d9a', 14);
+  ctx.fillStyle = '#ff3d9a';
+  const f = 6 + Math.random() * 7;
+  ctx.beginPath(); ctx.moveTo(-5, 10); ctx.lineTo(0, 10 + f); ctx.lineTo(5, 10); ctx.fill();
+  ctx.restore();
+}
+
+function drawStar(s) {
+  ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.rot);
+  glow('#ffd23f', 18);
+  ctx.fillStyle = '#ffd23f';
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2 - Math.PI / 2, d = i % 2 ? s.r * 0.45 : s.r * 1.1;
+    ctx.lineTo(Math.cos(a) * d, Math.sin(a) * d);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawRock(r) {
+  ctx.save(); ctx.translate(r.x, r.y); ctx.rotate(r.rot);
+  glow('#ff7a3d', 14);
+  ctx.strokeStyle = '#ff7a3d'; ctx.fillStyle = '#2a1018'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  r.pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
+function drawHUD() {
+  noGlow();
+  ctx.fillStyle = 'rgba(5,4,15,.6)'; ctx.fillRect(0, 0, W, 38);
+  ctx.font = 'bold 18px Tahoma, sans-serif'; ctx.textBaseline = 'middle';
+  glow('#ffd23f', 8); ctx.fillStyle = '#ffd23f'; ctx.textAlign = 'left';
+  ctx.fillText('⭐ ' + score, 12, 20);
+  glow('#27f3ff', 8); ctx.fillStyle = '#27f3ff'; ctx.textAlign = 'center';
+  ctx.fillText('LV ' + level, W / 2, 20);
+  ctx.fillStyle = '#b9c9ee'; ctx.textAlign = 'right';
+  ctx.fillText('BEST ' + best, W - 12, 20);
+  noGlow();
+  if (paused) {
+    ctx.fillStyle = 'rgba(5,4,15,.6)'; ctx.fillRect(0, 0, W, H);
+    glow('#27f3ff', 16); ctx.fillStyle = '#27f3ff'; ctx.textAlign = 'center';
+    ctx.font = 'bold 40px Tahoma, sans-serif'; ctx.fillText('PAUSED', W / 2, H / 2);
+    noGlow(); ctx.font = '16px Tahoma, sans-serif'; ctx.fillStyle = '#b9c9ee';
+    ctx.fillText('กด P เพื่อเล่นต่อ', W / 2, H / 2 + 36);
+  }
+}
+
+function draw() {
+  ctx.save();
+  ctx.fillStyle = '#05040f'; ctx.fillRect(0, 0, W, H);
+  if (shake > 0) ctx.translate((Math.random() - 0.5) * 12 * shake, (Math.random() - 0.5) * 12 * shake);
+
+  noGlow();
+  for (const s of bg) { ctx.fillStyle = `rgba(160,190,255,${0.25 + s.z * 0.5})`; ctx.fillRect(s.x, s.y, s.z * 2, s.z * 2 + 2); }
+
+  if (state !== 'menu') {
+    stars.forEach(drawStar);
+    rocks.forEach(drawRock);
+    if (state === 'play') drawShip(player.x, player.y);
+  }
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life); glow(p.color, 8); ctx.fillStyle = p.color; ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+  }
+  ctx.globalAlpha = 1; noGlow();
+  ctx.restore();
+  if (state !== 'menu') drawHUD();
+}
+
+/* ---------- ลูปหลักของเกม ---------- */
+let last = performance.now();
+function loop(now) {
+  requestAnimationFrame(loop);
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw();
+}
+requestAnimationFrame(loop);
+document.addEventListener('visibilitychange', () => { if (document.hidden) paused = state === 'play' ? true : paused; });
+</script>
+</body>
+</html>
